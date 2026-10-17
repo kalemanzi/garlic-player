@@ -34,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential qtbase5-dev qtbase5-dev-tools \
-            libqt5sql5-sqlite libqt5xmlpatterns5-dev
+            libqt5sql5-sqlite libqt5xmlpatterns5-dev patchelf
 
       - name: Write version.h (same scheme as build_scripts/player/writeVersionFromGithub.sh)
         run: |
@@ -65,6 +65,13 @@ jobs:
           echo "Replacing $target"
           ls -l "$(dirname "$target")"/libgarlic*
           cp -L build/lib/libgarlic.so.1 "$target"
+          # Upstream's lib has RUNPATH $ORIGIN so it finds the bundled Qt libs
+          # next to it; qmake here doesn't set it, so add it (and strip).
+          strip --strip-unneeded "$target"
+          patchelf --set-rpath '$ORIGIN' "$target"
+          patchelf --remove-needed ld-linux-aarch64.so.1 "$target" || true
+          readelf -d "$target" | grep -q 'RUNPATH.*\$ORIGIN' || { echo "RUNPATH missing"; exit 1; }
+          readelf -d "$target" | grep -E 'RUNPATH|NEEDED'
           find squashfs-root -name 'libQt5Core.so.5*' -type f -exec basename {} \;
 
           curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage
@@ -72,7 +79,7 @@ jobs:
           mkdir -p out
           ARCH=aarch64 ./appimagetool --appimage-extract-and-run squashfs-root \
             out/garlic-player-aarch64-$GARLIC_VERSION-inventoryfix.AppImage
-          cp -L build/lib/libgarlic.so.1 out/
+          cp -L "$target" out/libgarlic.so.1
           (cd out && sha256sum * > SHA256SUMS && cat SHA256SUMS)
 
       - uses: actions/upload-artifact@v4
