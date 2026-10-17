@@ -15,10 +15,10 @@ on:
     inputs:
       appimage_url:
         description: Official aarch64 AppImage to patch
-        default: https://github.com/garlic-signage/garlic-player/releases/download/v1.0.0/garlic-player-aarch64.AppImage
+        default: https://github.com/garlic-signage/garlic-player/releases/download/v1.0.1/garlic-player-aarch64.AppImage
       appimage_sha256:
         description: Expected sha256 of that AppImage (empty = skip check)
-        default: 2d2b9f53e9c6ed317d5aa8ed725f5ce68841aa44feb7ff3341dfe594b77da391
+        default: 69bae7e45e3485115c9ee6ef2630d7dd5608ee76739311db733d9b4d7830f402
 
 jobs:
   build:
