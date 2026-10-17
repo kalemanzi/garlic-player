@@ -1,0 +1,82 @@
+# Builds libgarlic for Linux aarch64 on a GitHub-hosted arm64 runner and
+# drops it into an official garlic-player aarch64 AppImage.
+#
+# Why only libgarlic: all inventory/download code lives in libgarlic.so.
+# Upstream's own AppImages are built on self-hosted runners with a custom
+# Qt 5.15.19 (incl. QtWebEngine), which is impractical to reproduce here.
+# The rebuilt lib (distro Qt 5.15.3) runs against the AppImage's bundled
+# Qt 5.15.x thanks to Qt's forward binary compatibility within 5.15.
+#
+# Manual trigger only, so it never runs next to upstream's build.yml.
+name: Patched aarch64 AppImage
+
+on:
+  workflow_dispatch:
+    inputs:
+      appimage_url:
+        description: Official aarch64 AppImage to patch
+        default: https://github.com/garlic-signage/garlic-player/releases/download/v1.0.0/garlic-player-aarch64.AppImage
+      appimage_sha256:
+        description: Expected sha256 of that AppImage (empty = skip check)
+        default: 2d2b9f53e9c6ed317d5aa8ed725f5ce68841aa44feb7ff3341dfe594b77da391
+
+jobs:
+  build:
+    # Ubuntu 22.04 (glibc 2.35) so the lib also runs on Debian 12 (glibc 2.36)
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags and commit count for version.h
+
+      - name: Install Qt 5.15 build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential qtbase5-dev qtbase5-dev-tools \
+            libqt5sql5-sqlite libqt5xmlpatterns5-dev
+
+      - name: Write version.h (same scheme as build_scripts/player/writeVersionFromGithub.sh)
+        run: |
+          COMMIT_NUMBER=$(git rev-list --all --count)
+          VERSION_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
+          GARLIC_VERSION=${VERSION_NAME%%-*}.$COMMIT_NUMBER
+          echo "#define version_from_git \"$GARLIC_VERSION\"" > src/garlic-lib/version.h
+          echo "GARLIC_VERSION=$GARLIC_VERSION" >> "$GITHUB_ENV"
+
+      - name: Build libgarlic (zlib, quazip, garlic-lib)
+        run: |
+          mkdir -p build && cd build
+          /usr/lib/qt5/bin/qmake ../src/libs_only.pro "CONFIG+=release"
+          make -j"$(nproc)"
+          ls -l lib/
+
+      - name: Patch official AppImage
+        run: |
+          curl -fsSL -o upstream.AppImage "${{ inputs.appimage_url }}"
+          if [ -n "${{ inputs.appimage_sha256 }}" ]; then
+            echo "${{ inputs.appimage_sha256 }}  upstream.AppImage" | sha256sum -c -
+          fi
+          chmod +x upstream.AppImage
+          ./upstream.AppImage --appimage-extract > /dev/null
+
+          target=$(find squashfs-root -name 'libgarlic.so.1*' -type f | head -n1)
+          if [ -z "$target" ]; then echo "libgarlic not found in AppImage"; exit 1; fi
+          echo "Replacing $target"
+          ls -l "$(dirname "$target")"/libgarlic*
+          cp -L build/lib/libgarlic.so.1 "$target"
+          find squashfs-root -name 'libQt5Core.so.5*' -type f -exec basename {} \;
+
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage
+          chmod +x appimagetool
+          mkdir -p out
+          ARCH=aarch64 ./appimagetool --appimage-extract-and-run squashfs-root \
+            out/garlic-player-aarch64-$GARLIC_VERSION-inventoryfix.AppImage
+          cp -L build/lib/libgarlic.so.1 out/
+          (cd out && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: garlic-player-aarch64-inventoryfix
+          path: out/
+          retention-days: 14
