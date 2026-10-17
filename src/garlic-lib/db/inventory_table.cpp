@@ -14,7 +14,7 @@ bool DB::InventoryTable::init(QString path)
     setDbPath(path);
     if (!db_file.exists())
     {
-        if (!createDbFile() || !openDbFile() || !createTable())
+        if (!createDbFile() || !openDbFile()) // openDbFile() creates the table
         {
             db_file.remove(); // delete to try again
             return false;
@@ -29,15 +29,16 @@ bool DB::InventoryTable::replace(DB::InventoryDataset dataset)
 {
     QSqlQuery query(db);
     QString   sql;
-    if (countByCacheName(dataset.cache_name) > 0)
-        sql = buildInsertSql(dataset);
-    else if (countByCacheName(dataset.cache_name) == -1)
+    int       count = countByCacheName(dataset.cache_name);
+    if (count == -1)
     {
-        qCritical(Database) << "replase failed" << sql << query.lastError().text();
+        qCritical(Database) << "replace failed: could not count cache_name" << dataset.cache_name;
         return false;
     }
-    else
+    else if (count > 0)
         sql = buildUpdateSql(dataset);
+    else
+        sql = buildInsertSql(dataset);
 
     if (!query.exec(sql))
     {
@@ -182,20 +183,28 @@ bool DB::InventoryTable::openDbFile()
         qCritical(Database) << "database file" << db_file.fileName() << "could not be created";
         return false;
     }
-    if (tableExists("inventory") && !hasField("inventory", "etag"))
+    if (!tableExists("inventory"))
+        return createTable();
+
+    // recreate tables from older player versions without etag field
+    if (!hasField("inventory", "etag"))
     {
         dropTable("inventory");
         return createTable();
     }
+
+    // recreate tables from older player versions without unique cache_name
+    // "unique" is a keyword in SQLite and must be quoted
     QSqlQuery query(db);
-    if (!query.exec("SELECT EXISTS (SELECT 1 FROM pragma_index_list('inventory') AS il JOIN pragma_index_info(il.name) AS ii ON il.unique = 1 AND ii.name = 'cache_name');"))
+    if (!query.exec("SELECT EXISTS (SELECT 1 FROM pragma_index_list('inventory') AS il JOIN pragma_index_info(il.name) AS ii ON il.\"unique\" = 1 AND ii.name = 'cache_name')"))
     {
-        qCritical(Database) << "Failed to execute query:" << query.lastError().text();
-        if (query.next() && !query.value(0).toBool())
-        {
-            dropTable("inventory");
-            return createTable();
-        }
+        qCritical(Database) << "Failed to check unique index on cache_name:" << query.lastError().text();
+        return true; // keep the existing table
+    }
+    if (query.next() && !query.value(0).toBool())
+    {
+        dropTable("inventory");
+        return createTable();
     }
     return true;
 }
@@ -256,7 +265,7 @@ int DB::InventoryTable::countByCacheName(QString cacheName)
 
 bool DB::InventoryTable::hasField(const QString &tableName, const QString &fieldName)
 {
-    QSqlQuery q;
+    QSqlQuery q(db); // use our named connection, not the default one
     q.prepare(QStringLiteral("PRAGMA table_info(%1)").arg(tableName));
     if (!q.exec()) return false;
     while (q.next()) {
