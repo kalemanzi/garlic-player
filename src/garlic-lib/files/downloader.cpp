@@ -161,6 +161,12 @@ void Downloader::checkHttpHeaders(QNetworkReply *reply)
         if (currentDataset.etag == remoteEtag)
         {
             qDebug() << remote_file_url.toString() << " no need for update";
+            // matched via local md5 (see handleDifferentServer()), so file is not in inventory yet
+            if (MyInventoryTable != Q_NULLPTR && currentDataset.resource_uri != remote_file_url.toString())
+            {
+                insertDatabase();
+                MyInventoryTable->updateFileStatusAndSize(remote_file_url.toString(), DB::COMPLETE, local_file_info.size());
+            }
             emitNotModified(reply);
             return;
         }

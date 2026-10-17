@@ -44,7 +44,7 @@ QNetworkRequest TNetworkAccess::prepareConditionalRequest(QUrl remote_url, const
     if (lastModifiedUtc.isValid())
     {
         QLocale englishLocale(QLocale::English, QLocale::AnyCountry);
-        QByteArray ifModifiedSinceValue = englishLocale.toString(lastModifiedUtc, "ddd, dd MMM yyyy hh:mm:ss 'GMT'").toUtf8();
+        QByteArray ifModifiedSinceValue = englishLocale.toString(lastModifiedUtc.toUTC(), "ddd, dd MMM yyyy hh:mm:ss 'GMT'").toUtf8();
         request.setRawHeader(QByteArray("If-Modified-Since"), ifModifiedSinceValue);
     }
 
